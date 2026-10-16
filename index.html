@@ -1,1 +1,201 @@
 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nexus Chat</title>
+<style>
+  :root {
+    --bg: #080a1a;
+    --panel: #0f1230;
+    --panel-2: #161a44;
+    --line: #262b63;
+    --text: #e8ebff;
+    --muted: #8189c4;
+    --cyan: #4de1ff;
+    --violet: #8b6bff;
+    --danger: #ff5d7a;
+    --ok: #4dffb0;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; }
+  body {
+    background:
+      radial-gradient(900px 500px at 85% -10%, rgba(139,107,255,.22), transparent 60%),
+      radial-gradient(700px 500px at -10% 110%, rgba(77,225,255,.14), transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+    display: flex; align-items: center; justify-content: center;
+    padding: 16px;
+  }
+  .chat {
+    width: 100%; max-width: 760px; height: min(780px, 100%);
+    display: flex; flex-direction: column;
+    background: rgba(15,18,48,.86);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    box-shadow: 0 0 0 1px rgba(77,225,255,.06), 0 30px 80px rgba(0,0,0,.55), 0 0 60px rgba(139,107,255,.12);
+    overflow: hidden;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(90deg, rgba(77,225,255,.08), rgba(139,107,255,.08));
+  }
+  h1 { font-size: 1.05rem; font-weight: 600; letter-spacing: .04em; }
+  .status { display: flex; align-items: center; gap: 8px; font-size: .85rem; color: var(--muted); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 10px var(--danger); transition: .3s; }
+  .status.online .dot { background: var(--ok); box-shadow: 0 0 10px var(--ok); }
+
+  #messages {
+    flex: 1; overflow-y: auto; padding: 20px;
+    display: flex; flex-direction: column; gap: 12px;
+    scrollbar-width: thin; scrollbar-color: var(--line) transparent;
+  }
+  .empty { margin: auto; color: var(--muted); text-align: center; font-size: .95rem; }
+  .msg { max-width: 78%; display: flex; flex-direction: column; gap: 4px; }
+  .msg .meta { font-size: .75rem; color: var(--muted); padding: 0 6px; }
+  .msg .bubble {
+    padding: 10px 14px; border-radius: 14px; line-height: 1.45;
+    background: var(--panel-2); border: 1px solid var(--line);
+    overflow-wrap: anywhere; white-space: pre-wrap;
+  }
+  .msg.mine { align-self: flex-end; align-items: flex-end; }
+  .msg.mine .bubble {
+    background: linear-gradient(135deg, rgba(77,225,255,.22), rgba(139,107,255,.28));
+    border-color: rgba(77,225,255,.45);
+    border-bottom-right-radius: 4px;
+  }
+  .msg:not(.mine) .bubble { border-bottom-left-radius: 4px; }
+  .system { align-self: center; font-size: .8rem; color: var(--muted); }
+
+  form {
+    display: flex; gap: 10px; padding: 14px;
+    border-top: 1px solid var(--line); background: var(--panel);
+  }
+  #input {
+    flex: 1; min-width: 0; padding: 13px 16px;
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--line); border-radius: 12px;
+    font: inherit; outline: none; transition: border-color .2s, box-shadow .2s;
+  }
+  #input::placeholder { color: var(--muted); }
+  #input:focus { border-color: var(--cyan); box-shadow: 0 0 0 3px rgba(77,225,255,.18); }
+  button {
+    padding: 0 22px; border: 0; border-radius: 12px; cursor: pointer;
+    font: inherit; font-weight: 600; color: #04061a;
+    background: linear-gradient(135deg, var(--cyan), var(--violet));
+    transition: transform .15s, box-shadow .2s, opacity .2s;
+  }
+  button:hover { box-shadow: 0 0 22px rgba(77,225,255,.45); }
+  button:active { transform: scale(.97); }
+  button:disabled { opacity: .4; cursor: not-allowed; box-shadow: none; }
+  button:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+
+  @media (max-width: 520px) {
+    body { padding: 0; }
+    .chat { border-radius: 0; height: 100%; border: 0; }
+    .msg { max-width: 90%; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+  <main class="chat">
+    <header>
+      <h1>Nexus Chat</h1>
+      <div class="status" id="status"><span class="dot"></span><span id="statusText">Connecting…</span></div>
+    </header>
+
+    <div id="messages" aria-live="polite">
+      <p class="empty" id="empty">No messages yet. Say something to start the conversation.</p>
+    </div>
+
+    <form id="form" autocomplete="off">
+      <input id="input" type="text" placeholder="Type a message" aria-label="Message" maxlength="1000">
+      <button id="send" type="submit" disabled>Send</button>
+    </form>
+  </main>
+
+  <!-- Served automatically by your Socket.io server -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    // To connect to a different server, use: const socket = io("http://localhost:3000");
+    const socket = io();
+
+    const messagesEl = document.getElementById("messages");
+    const emptyEl = document.getElementById("empty");
+    const form = document.getElementById("form");
+    const input = document.getElementById("input");
+    const sendBtn = document.getElementById("send");
+    const statusEl = document.getElementById("status");
+    const statusText = document.getElementById("statusText");
+
+    // Anonymous identity for this tab
+    const clientId = Math.random().toString(36).slice(2, 10);
+    const username = "user-" + clientId.slice(0, 4);
+
+    function scrollToBottom() {
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    function addMessage(data) {
+      if (emptyEl) emptyEl.remove();
+      const mine = data.clientId === clientId;
+
+      const wrap = document.createElement("div");
+      wrap.className = "msg" + (mine ? " mine" : "");
+
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      const time = new Date(data.time || Date.now())
+        .toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      meta.textContent = (mine ? "You" : data.user || "Anonymous") + " · " + time;
+
+      const bubble = document.createElement("div");
+      bubble.className = "bubble";
+      bubble.textContent = data.text; // textContent prevents HTML injection
+
+      wrap.append(meta, bubble);
+      messagesEl.appendChild(wrap);
+      scrollToBottom();
+    }
+
+    function addSystem(text) {
+      const el = document.createElement("div");
+      el.className = "system";
+      el.textContent = text;
+      messagesEl.appendChild(el);
+      scrollToBottom();
+    }
+
+    function setOnline(online) {
+      statusEl.classList.toggle("online", online);
+      statusText.textContent = online ? "Connected" : "Disconnected";
+      sendBtn.disabled = !online || !input.value.trim();
+    }
+
+    socket.on("connect", () => setOnline(true));
+    socket.on("disconnect", () => { setOnline(false); addSystem("Connection lost. Reconnecting…"); });
+    socket.on("connect_error", () => setOnline(false));
+    socket.on("chat message", addMessage);
+
+    input.addEventListener("input", () => {
+      sendBtn.disabled = !socket.connected || !input.value.trim();
+    });
+
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text || !socket.connected) return;
+      socket.emit("chat message", { clientId, user: username, text, time: Date.now() });
+      input.value = "";
+      sendBtn.disabled = true;
+      input.focus();
+    });
+  </script>
+</body>
+</html>
