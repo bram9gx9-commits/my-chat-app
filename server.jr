@@ -1,1 +1,45 @@
 
+const path = require("path");
+const http = require("http");
+const express = require("express");
+const { Server } = require("socket.io");
+
+const PORT = process.env.PORT || 3000;
+const MAX_MESSAGE_LENGTH = 1000;
+
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
+
+// Serve index.html from the same folder as this file
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "index.html"));
+});
+
+io.on("connection", (socket) => {
+  console.log(`Connected: ${socket.id} (${io.engine.clientsCount} online)`);
+
+  // Receive a message from one client and broadcast it to everyone,
+  // including the sender (the client draws messages only when they come back).
+  socket.on("chat message", (data) => {
+    if (!data || typeof data.text !== "string") return;
+
+    const text = data.text.trim().slice(0, MAX_MESSAGE_LENGTH);
+    if (!text) return;
+
+    io.emit("chat message", {
+      clientId: String(data.clientId || "").slice(0, 32),
+      user: String(data.user || "Anonymous").slice(0, 32),
+      text,
+      time: Date.now(), // server time keeps timestamps consistent across clients
+    });
+  });
+
+  socket.on("disconnect", (reason) => {
+    console.log(`Disconnected: ${socket.id} (${reason})`);
+  });
+});
+
+server.listen(PORT, () => {
+  console.log(`Chat server running at http://localhost:${PORT}`);
+});
